@@ -1,0 +1,46 @@
+Checking Search Peer:
+
+| rest splunk_server=local /services/search/distributed/peers/ 
+| where status="Up" AND disabled=0 
+| fields peerName, status 
+| rename peerName as Instance, status as Status
+
+Sourcetype inventory – short version
+| tstats count AS event_count dc(source) AS source dc(host) AS hosts WHERE index=* by sourcetype index
+Sourcetype inventory – long version:
+| tstats count AS event_count WHERE index=* by sourcetype index host
+
+What is each host sending:
+| tstats values(sourcetype) AS sourcetypes  where index=* by host
+
+Basic Splunk errors:
+index=_internal source=*splunkd.log sourcetype=splunkd NOT info (log_level="WARN" OR log_level="ERROR" OR log_level="CRIT" OR log_level="FATAL")  *  | timechart count by log_level
+
+Basic Splunk errors detailed:
+index=_internal source=*splunkd.log sourcetype=splunkd NOT info (log_level="WARN" OR log_level="ERROR" OR log_level="CRIT" OR log_level="FATAL")  *  | timechart count by log_level
+
+Index time errors: Event Truncation
+index=_internal source=*splunkd.log sourcetype=splunkd (component=AggregatorMiningProcessor OR component=LineBreakingProcessor) (log_level=WARN OR log_level=ERROR)
+
+Index time errors: timestamping
+index=_internal source=*splunkd.log sourcetype=splunkd component=DateParserVerbose (log_level=WARN OR log_level=ERROR)
+
+Index time errors: data from the FUTURE
+| tstats count WHERE index=* earliest=+30min@m latest=+20y@y GROUPBY sourcetype source host | join type=left sourcetype [|metadata type=sourcetypes index=* | convert ctime(*Time)] | stats values(host) AS Hosts values(sourcetype) AS Sourcetype values(lastTime) AS "Furthest Out Event"
+
+Check that all Splunk infrastructure is forwarding internal logs to the indexers for monitoring:
+| rest splunk_server_group=* /services/server/info
+| fields splunk_server isForwarding server_roles
+| where (server_roles=="search_head" OR server_roles=="cluster_master" OR server_roles=="license_master" OR server_roles=="shc_deployer" OR server_roles=="deployment_server" OR isNull(server_roles))
+| eval severity_level = case( isForwarding==1, 0, isForwarding == 0, 2, true(), -1)
+| rename splunk_server AS instance
+
+System cannot connect or resolve a hostname:
+index=_internal sourcetype=splunkd source=*splunkd.log (log_level=WARN OR log_level=ERROR) component=TcpOutputProc
+
+Check data retention:
+|dbinspect index=* | eval state=if(state=="warm" OR state=="hot","hot/warm",state) | stats sum(sizeOnDiskMB) AS size_mb sum(eventCount) AS event_count min(startEpoch) AS earliest_bucket max(endEpoch) AS latest_bucket by index state | convert ctime(*bucket) | eval range=tostring(strptime(latest_bucket, "%m/%d/%Y %H:%M:%S") - strptime(earliest_bucket, "%m/%d/%Y %H:%M:%S"),"duration") | eval "Total Size (GB)"=tostring(size_mb/1024,"commas") | eval "Event Count"=tostring(event_count,"commas") | join index [|rest splunk_server_group=dmc_group_indexer /services/data/indexes | rename title AS index | eval "Retention Days"=frozenTimePeriodInSecs/60/60/24 | fields index "Retention Days"] | rename index AS Index  state AS State earliest_bucket AS "Earliest Bucket" latest_bucket AS "Latest Bucket" range AS Range| table Index "Retention Days" State "Earliest Bucket" "Latest Bucket" "Event Count" "Total Size (GB)" Range | sort – range
+
+Indexer capacity (run from MC):
+| rest splunk_server_group=dmc_group_indexer /services/data/indexes search="totalEventCount!=0"  | eval coldPath.maxDataSizeMB=if('coldPath.maxDataSizeMB' = 0, null(), 'coldPath.maxDataSizeMB') | eval homePath.maxDataSizeMB=if('homePath.maxDataSizeMB' = 0, null(), 'homePath.maxDataSizeMB') | eval roof=min((coalesce('homePath.maxDataSizeMB', 4294967295) +                  coalesce('coldPath.maxDataSizeMB', 4294967295)),                 maxTotalDataSizeMB) | eval span=tostring(currentDBSizeMB) + " / " +     tostring(roof) + " MB" | eval PercentFull=tostring(round(currentDBSizeMB * 100 / roof)) + "%" | eval "Total Events"=tostring(totalEventCount,"commas")| stats first(span) AS "Capacity vs Limit" by splunk_server title minTime maxTime "Total Events" PercentFull | rename splunk_server AS Indexer title AS Index minTime AS "Oldest Event" maxTime AS "Newest Event" | table Indexer Index "Capacity vs Limit" "Oldest Event" "Newest Event" "Total Events" PercentFull | sort - PercentFull
+

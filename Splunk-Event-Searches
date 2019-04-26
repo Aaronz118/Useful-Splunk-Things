@@ -1,22 +1,22 @@
 
-Anomaly traffic on port 445
+Anomaly traffic on port 445:
 dest_port=445 action=allowed NOT (dest=10.* OR dest=192.* OR dest=172.*)  | stats count by dest_ip | where count < 10
 
 eventtype searches for password/lockout:
 index=“index name” source=WinEventLog:Security sourcetype=wineventlog user=username (eventtype="windows_logon_failure" OR eventtype="windows_account_lockout" OR eventtype="windows_account_password_change" OR EventCode=4771) earliest=-14d | table _time, user, EventCode, Caller_Computer_Name, Message | sort _time
 
 lateral movement, we're identifying processes connecting remotely into a host. 
-Our initial search could use Windows security logs, looking for authentication events over the network from rare or unusual hosts or users.
+Our initial search could use Windows security logs, looking for authentication events over the network from rare or unusual hosts or users:
 index=“index name” source=WinEventLog:Security sourcetype=wineventlog EventCode=4672 Logon_Type=3 NOT user="*$" NOT user="ANONYMOUS LOGON" 
 | stats  count  BY dest src_ip dest_nt_domain user EventCode 
 | sort count
 
-Created User Accounts
+Created User Accounts:
 EventCode=4722 (NOT (User_Name="*$" OR Account_Name="*$")) | eval
 Date=strftime(_time, "%Y/%m/%d %H:%M:%S")| table Date, src_user, user,
 EventCodeDescription | sort - Date | rename src_user as "Who Created"
 
-Deleted Event Logs
+Deleted Event Logs:
 
 index=“index name” source=WinEventLog:Security sourcetype=wineventlog EventCode=1102
 Message!=*Microsoft-Exchange* | rex field=Message "(?<Message>.*)\." |
@@ -24,7 +24,7 @@ transaction host | mvexpand Message | eval Time=strftime(_time,"%m/%d/%Y
 %H:%M:%S") | table Time host Message Account_Name | rename host as "Computer
 Name" Account_Name as "Cleared By" Message as "Logs Cleared"
 
-NTDSUTIL.EXE OR REG.EXE
+NTDSUTIL.EXE OR REG.EXE:
 
 index=“index name” source=WinEventLog:Security sourcetype=wineventlog EventCode=4688
 ("ntdsutil.exe" OR "reg.exe") Account_Name!=*$ | eval
@@ -34,7 +34,7 @@ Account_Name as "User Account" host as "Target Computer"
 Process_Command_Line as "Command Line" New_Process_Name as "Process
 Created"
 
-Searching for Random AF Things
+Searching for Random AF Things:
 index=“index name” source=WinEventLog:Security sourcetype=wineventlog LogName=Security EventCode=4688 NOT (Account_Name=*$) NOT (Account_Name=stask) (at.exe OR bcdedit.exe OR chcp.exe OR
 cmd.exe OR cscript.exe OR ipconfig.exe OR mimikatz.exe OR nbtstat.exe OR nc.exe OR netcat.exe OR netstat.exe OR
 nmap OR nslookup.exe OR bcp.exe OR sqlcmd.exe OR OSQL.exe OR ping.exe OR powershell.exe OR powercat.ps1 OR
@@ -44,7 +44,7 @@ tracert.exe OR vssadmin.exe OR whoami.exe OR winrar.exe OR wscript.exe OR winrm.
 Account_Name, Process_Name, Process_ID, Process_Command_Line, New_Process_Name, New_Process_ID,
 Creator_Process_ID, Short_Message
 
-Monitor for Logon Success
+Monitor for Logon Success:
 index=“index name” source=WinEventLog:Security sourcetype=wineventlog EventCode=4624 
 (Account_Name=*$ OR Account_Name=ANONYMOUS LOGON) NOT (Account_Name=Service_Account) | eval
 Account_Domain=(mvindex(Account_Domain,1)) | eval Account_Name=if(Account_Name="-
@@ -55,19 +55,19 @@ dc(host) AS Host_Count, values(Logon_Type) AS Logon_Type, values(Workstation_Nam
 values(Source_Network_Address) AS Source_IP, values(Process_Name) AS Process_Name by Account_Name | where
 Host_Count > 2
 
-Monitor for Admin and Guest Logins
+Monitor for Admin and Guest Logins:
 index=“index name” source=WinEventLog:Security sourcetype=wineventlog LogName=Security EventCode=4625 (Account_Name=administrator OR Account_Name=guest) | stats
 count values(Workstation_Name) AS Workstation_Name, Values(Source_Network_Address) AS Source_IP_Address,
 values(host) AS Host by Account_Name | where count > 5
 
-Active Directory Account Disabled
+Active Directory Account Disabled:
 index=“index name” source=WinEventLog:Security sourcetype=wineventlog EventCode=4725 user!=*$ 
 | convert ctime(_time) as Time 
 | stats values(Time) as "Time" values(name) as "Actions" by Account_Domain, src_user, user 
 | rename Account_Domain as "Account Domain", src_user as "Source User", user as "User" 
 | table Time "Account Domain" "Source User" "User" "Actions" | sort -Time
 
-AD Password Set to Never Expire
+AD Password Set to Never Expire:
 index=“index name” source=WinEventLog:Security sourcetype=wineventlog EventCode=4738 user!=*$ New_UAC_Value=0x210 
 | convert ctime(_time) as Time 
 | stats values(Time) as "Time" by Account_Domain, src_user, user 

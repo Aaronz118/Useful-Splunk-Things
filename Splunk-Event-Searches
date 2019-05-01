@@ -34,7 +34,7 @@ Account_Name as "User Account" host as "Target Computer"
 Process_Command_Line as "Command Line" New_Process_Name as "Process
 Created"
 
-Searching for Random AF Things:
+Searching for MaliciousTools & Exploits:
 index=“index name” source=WinEventLog:Security sourcetype=wineventlog LogName=Security EventCode=4688 NOT (Account_Name=*$) NOT (Account_Name=stask) (at.exe OR bcdedit.exe OR chcp.exe OR
 cmd.exe OR cscript.exe OR ipconfig.exe OR mimikatz.exe OR nbtstat.exe OR nc.exe OR netcat.exe OR netstat.exe OR
 nmap OR nslookup.exe OR bcp.exe OR sqlcmd.exe OR OSQL.exe OR ping.exe OR powershell.exe OR powercat.ps1 OR
@@ -84,5 +84,20 @@ Excessive Failed Logins
 | where 'count'>=10
 | rename src as "Host", user as "User", app as "Application"
 
+L2L Scanner
 
+index="index name" sourcetype=firewall action=blocked (src_ip=10.0.0.0/8 OR src_ip=172.16.0.0/12, OR src_ip=192.168.0.0/16) (dest_ip=10.0.0.0/8 OR dest_ip=172.16.0.0/12, OR dest_ip=192.168.0.0/16) NOT src_ip=172.16.18.45
+| eventstats dc(dest_ip) AS unique_destinations dc(dest_port) AS unique_ports by src_ip
+| where unique_destinations > 50 OR unique_ports > 40
+| dedup src_ip
+| table src_ip, unique_destinations, unique_ports
+| sort -unique_destinations
 
+L2R Scanner
+
+index="index name" sourcetype=firewall action=blocked (src_ip=10.0.0.0/8 OR src_ip=172.16.0.0/12, OR src_ip=192.168.0.0/16) NOT (dest_ip=10.0.0.0/8 OR dest_ip=172.16.0.0/12, OR dest_ip=192.168.0.0/16) NOT (dest_port=80 OR dest_port=443)
+| eventstats dc(dest_ip) AS unique_destinations dc(dest_port) AS unique_ports by src_ip
+| where unique_destinations > 50 OR unique_ports > 40
+| dedup src_ip
+| table src_ip, unique_destinations, unique_ports
+| sort -unique_destinations
